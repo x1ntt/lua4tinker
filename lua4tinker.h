@@ -11,8 +11,12 @@ extern "C" {
 #include <cassert>
 #include <concepts>
 #include <typeinfo>
+#include <functional>
 
 namespace lua4tinker {
+
+    // 用于获取lua_pushcclosure附带的upvalue索引, index为想要获取的upvalue索引，n为upvalues的数量
+    #define lua_upvalueindex(index, n) (index-(n+1))
 
     lua_State *new_state() {
         return lua_open (8192);
@@ -41,12 +45,12 @@ namespace lua4tinker {
 
     template <typename T>
     struct stack_helper {
-        static T read(lua_State *L) {
-            return std::make_optional<T>;
-        }
         static void push(lua_State *L, T && val) {
             std::cout << typeid(val).name() << std::endl;
             assert(!"尚未处理的push");
+        }
+        static T read(lua_State *L, size_t index) {
+            return std::make_optional<T>;
         }
     };
 
@@ -56,10 +60,10 @@ namespace lua4tinker {
             lua_pushlstring(L, val.c_str(), val.size());
         }
 
-        static std::string read(lua_State *L) {
-            if (lua_type(L, 1) == LUA_TSTRING) {
-                const char *str = lua_tostring(L, 1);
-                size_t str_size = lua_strlen(L, 1);
+        static std::string read(lua_State *L, size_t index) {
+            if (lua_type(L, index) == LUA_TSTRING) {
+                const char *str = lua_tostring(L, index);
+                size_t str_size = lua_strlen(L, index);
                 return std::string(str, str_size);
             }
             return "";
@@ -75,9 +79,9 @@ namespace lua4tinker {
         static void push(lua_State *L, T val) {
             lua_pushnumber(L, val);
         }
-        static T read(lua_State *L) {
-            if (lua_type(L, 1) == LUA_TNUMBER) {    // lua4中number包含数值和字符串型的数值
-                return (T)lua_tonumber(L, 1);
+        static T read(lua_State *L, size_t index) {
+            if (lua_type(L, index) == LUA_TNUMBER) {    // lua4中number包含数值和字符串型的数值
+                return (T)lua_tonumber(L, index);
             } else {
                 assert(!"堆栈中不是number");
             } 
@@ -85,19 +89,92 @@ namespace lua4tinker {
         }
     };
 
-    // template <typename T>
-    // void push(lua_State *L, T && val) {
-    //     stack_helper<T>::push(L, std::forward<T>(val));
-    // }
-
-    // template <typename T>
-    // T read(lua_State *L) {
-    //     return stack_helper<T>::read(L);
-    // }
+    template <typename T>
+    void push(lua_State *L, T &&val) {
+        stack_helper<T>::push(L, std::forward<T>(val));
+    }
 
     template <typename T>
-    void set(lua_State* L, const char* name, T&& object) {
-        stack_helper<std::decay_t<T>>::push(L, std::forward<T>(object));
+    T read(lua_State *L, size_t index) {
+        return stack_helper<T>::read(L, index);
+    }
+
+    // Function
+
+    template<int32_t nIdxParams, typename RVal, typename Func, typename... Args, std::size_t... index>
+    RVal direct_invoke_invoke_helper(Func&& func, lua_State* L, std::index_sequence<index...>)
+    {
+        // return stdext::invoke(std::forward<Func>(func), read<Args>(L, index + nIdxParams)...);
+        return func(read<Args>(L, index + nIdxParams)...);
+    }
+    
+    template<int32_t nIdxParams, typename RVal, typename Func, typename... Args>
+    RVal direct_invoke_func(Func&& func, lua_State* L)
+    {
+        return direct_invoke_invoke_helper<nIdxParams, RVal, Func, Args...>(std::forward<Func>(func),
+            L,
+            std::make_index_sequence<sizeof...(Args)>{});
+    }
+
+    struct functor_base {
+        virtual ~functor_base() {}
+        virtual int apply(lua_State *L) = 0;
+    };
+
+    template <typename RVal, typename... Args>
+    struct functor : functor_base {
+        typedef std::function<RVal(Args...)> FunctionType;
+        using FuncWarpType = functor<RVal, Args...>;
+        FunctionType       func;
+        std::string        name;
+
+        functor(const char *_name, FunctionType &&_func) : name(_name), func(_func) { };
+
+        int apply(lua_State *L) {
+            return invoke_function<RVal, FunctionType>(L, std::forward<FunctionType>(func));
+        }
+
+        static int invoke(lua_State *L) {
+            // 这里会被注册给lua，从这里取出当前的函数包裹器，并获取参数并调用
+            auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
+            if (pThis == nullptr) {
+                assert(!"拿取用户数据失败");
+                return 0;
+            }
+            return pThis->apply(L);
+        }
+
+        template <typename R, typename Func>
+        static int invoke_function(lua_State *L, Func &&func) {
+            if constexpr (!std::is_void_v<R>) { // 函数有返回值，需要将返回值压栈
+                push<RVal>(L, direct_invoke_func<1, RVal, Func, Args...>(std::forward<Func>(func), L));
+                return 1;
+            }else {
+                
+            }
+            return 0;
+        }
+    };
+
+    template <typename R, typename... Args>
+    void push_functor(lua_State *L, const char *name, R(func)(Args...)) {
+        // 创建用户数据，将函数包裹器置入lua内存（以便利用lua的垃圾回收析构Functor对象）
+        using Functor_wrap = functor<R, Args...>;
+        new (lua_newuserdata(L, sizeof(Functor_wrap))) Functor_wrap(name, func);    // 使用lua的内存存放函数包裹器
+        
+        lua_pushcclosure(L, &Functor_wrap::invoke, 1);
+    }
+    
+    template <typename Func>
+    void def(lua_State *L, const char *name, Func &&func) {
+        push_functor(L, name, std::forward<Func>(func));
+        lua_setglobal(L, name);
+    }
+
+    template <typename T>
+    void set(lua_State* L, const char* name, T&& val) {
+        // stack_helper<std::decay_t<T>>::push(L, std::forward<T>(object));
+        push<std::decay_t<T>>(L, std::forward<T>(val));
         lua_setglobal(L, name);
     }
 
@@ -105,7 +182,7 @@ namespace lua4tinker {
     T get(lua_State *L, const char* name) {
         lua_getglobal(L, name);
         stack_delay_pop tmp(L, 1);
-        return stack_helper<T>::read(L);
+        return read<T>(L, 1);
     }
 }
 
