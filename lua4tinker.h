@@ -104,7 +104,6 @@ namespace lua4tinker {
     template<int32_t nIdxParams, typename RVal, typename Func, typename... Args, std::size_t... index>
     RVal direct_invoke_invoke_helper(Func&& func, lua_State* L, std::index_sequence<index...>)
     {
-        // return stdext::invoke(std::forward<Func>(func), read<Args>(L, index + nIdxParams)...);
         return func(read<Args>(L, index + nIdxParams)...);
     }
     
@@ -150,7 +149,7 @@ namespace lua4tinker {
                 push<RVal>(L, direct_invoke_func<1, RVal, Func, Args...>(std::forward<Func>(func), L));
                 return 1;
             }else {
-                
+                direct_invoke_func<1, RVal, Func, Args...>(std::forward<Func>(func), L);
             }
             return 0;
         }
