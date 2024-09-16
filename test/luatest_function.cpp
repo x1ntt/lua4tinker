@@ -16,6 +16,11 @@ int main() {
 
     lua4tinker::def(L, "cpp_sum", sum);
     lua4tinker::def(L, "strcheck", strcheck);
+    
+    // lua4tinker::def(L, "lamfunc", [](int a, std::string str, float flt) -> int {
+    //     std::cout<< a << ", " << str << ", " << flt <<std::endl;
+    //     return a + str.size();
+    // });
 
     return lua4tinker::do_string(L, R"(
         assert(cpp_sum(1, 2, 3) == 6)
