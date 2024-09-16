@@ -172,9 +172,8 @@ namespace lua4tinker {
     }
 
     template <typename T>
-    void set(lua_State* L, const char* name, T&& val) {
-        // stack_helper<std::decay_t<T>>::push(L, std::forward<T>(object));
-        push<std::decay_t<T>>(L, std::forward<T>(val));
+    void set(lua_State* L, const char* name, T && val) {
+        push<std::decay_t<T>>(L, std::forward<std::decay_t<T>>(val));
         lua_setglobal(L, name);
     }
 
