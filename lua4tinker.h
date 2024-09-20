@@ -18,6 +18,9 @@ namespace lua4tinker {
     // 用于获取lua_pushcclosure附带的upvalue索引, index为想要获取的upvalue索引，n为upvalues的数量
     #define lua_upvalueindex(index, n) (index-(n+1))
 
+    // 补充 error codes for lua_do*
+    #define LUA_OK  0
+
     lua_State *new_state() {
         return lua_open (8192);
     }
@@ -101,6 +104,7 @@ namespace lua4tinker {
 
     // Function
 
+    // lua 调用 cpp 函数
     template<int32_t nIdxParams, typename RVal, typename Func, typename... Args, std::size_t... index>
     RVal direct_invoke_invoke_helper(Func&& func, lua_State* L, std::index_sequence<index...>)
     {
@@ -157,17 +161,69 @@ namespace lua4tinker {
 
     template <typename R, typename... Args>
     void push_functor(lua_State *L, const char *name, R(func)(Args...)) {
-        // 创建用户数据，将函数包裹器置入lua内存（以便利用lua的垃圾回收析构Functor对象）
+        // 创建用户数据，将函数包裹器置入lua内存（以便利用lua的垃圾回收析构Functor对象）TODO
         using Functor_wrap = functor<R, Args...>;
         new (lua_newuserdata(L, sizeof(Functor_wrap))) Functor_wrap(name, func);    // 使用lua的内存存放函数包裹器
         
         lua_pushcclosure(L, &Functor_wrap::invoke, 1);
     }
+
+    // cpp 调用 lua 函数
+
+    void push_args(lua_State* L) {};
+    template<typename T, typename... Args>
+    void push_args(lua_State* L, T&& parm)
+    {
+        push(L, std::forward<T>(parm));
+    }
+    template<typename T, typename... Args>
+    void push_args(lua_State* L, T&& parm, Args&&... args)
+    {
+        push(L, std::forward<T>(parm));
+        push_args<Args...>(L, std::forward<Args>(args)...);
+    }
+
+    // pop a value from lua stack
+    template<typename T>
+    struct pop
+    {
+        static constexpr const int32_t nresult = 1;
+
+        static T apply(lua_State* L)
+        {
+            stack_delay_pop _dealy(L, nresult);
+            return read<T>(L, -1);
+        }
+    };
+
+    template <typename RVal, typename... Args>
+    RVal call_stackfunc(lua_State *L, Args&&... args) {
+        push_args(L, std::forward<Args>(args)...);
+        int ret = LUA_OK;
+        if ((ret = lua_call(L, sizeof...(args), pop<RVal>::nresult)) != LUA_OK) {
+            std::cout << "调用lua4函数失败: " << ret << std::endl;
+            return 0;
+        }
+        return pop<RVal>::apply(L);
+    }
+
     
+    // 使用接口
     template <typename Func>
     void def(lua_State *L, const char *name, Func &&func) {
         push_functor(L, name, std::forward<Func>(func));
         lua_setglobal(L, name);
+    }
+
+    template <typename RVal, typename... Args>
+    RVal call(lua_State *L, const char *name, Args &&... args) {
+        lua_getglobal(L, name);
+        if (lua_isfunction(L, -1) == false) {
+            lua_pop(L, 1);
+            assert(!"所调用的不是函数");
+        } else {
+            return call_stackfunc<RVal>(L, std::forward<Args>(args)...);
+        }
     }
 
     template <typename T>

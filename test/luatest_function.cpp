@@ -22,8 +22,23 @@ int main() {
     //     return a + str.size();
     // });
 
-    return lua4tinker::do_string(L, R"(
+    int ret =  lua4tinker::do_string(L, R"(
         assert(cpp_sum(1, 2, 3) == 6)
         assert(strcheck(6, "hello~") == 1)
+
+        function max(n1, n2)
+            if (n1 > n2) then
+                res = n1;
+            else
+                res = n2;
+            end
+            return res;
+        end 
     )");
+
+    if (lua4tinker::call<int>(L, "max", 1, 2) != 2) {
+        return 1;
+    }
+
+    return ret;
 }
