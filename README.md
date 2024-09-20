@@ -8,15 +8,16 @@
 
 ## 目前实现的功能
 
-+ 定义全局变量到lua4 和 获取全局变量
++ 定义全局变量到lua4 和 获取全局变量 完整例子见`test/luatest_global.cpp`
 
 ```cpp
 lua4tinker::set(L, "int_val", int_val);
 int int_val2 = lua4tinker::get<int>(L, "int_val2");
 ```
 
-+ 定义全局函数
++ 双向全局函数调用 完整例子见 `test/luatest_function.cpp`
 
 ```cpp
-lua4tinker::def(L, "cpp_sum", sum);
+lua4tinker::def(L, "cpp_sum", sum); // lua4 调用 cpp 函数
+lua4tinker::call<int>(L, "max", 1, 2);   // cpp 调用 lua4 函数
 ```
