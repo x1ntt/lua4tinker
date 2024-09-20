@@ -21,8 +21,8 @@ namespace lua4tinker {
     // 补充 error codes for lua_do*
     #define LUA_OK  0
 
-    lua_State *new_state() {
-        return lua_open (8192);
+    lua_State *new_state(size_t size = 8192) {
+        return lua_open (size);
     }
 
     void open_libs(lua_State *L) {
@@ -68,6 +68,8 @@ namespace lua4tinker {
                 const char *str = lua_tostring(L, index);
                 size_t str_size = lua_strlen(L, index);
                 return std::string(str, str_size);
+            }else {
+                std::cerr << "堆栈中不是字符串, 请检查参数类型是否正确" << std::endl;
             }
             return "";
         }
@@ -86,9 +88,9 @@ namespace lua4tinker {
             if (lua_type(L, index) == LUA_TNUMBER) {    // lua4中number包含数值和字符串型的数值
                 return (T)lua_tonumber(L, index);
             } else {
-                assert(!"堆栈中不是number");
+                std::cerr << "堆栈中不是number, 请检查参数类型是否正确" << std::endl;
             } 
-            return 0; 
+            return (T)0; 
         }
     };
 
@@ -201,8 +203,8 @@ namespace lua4tinker {
         push_args(L, std::forward<Args>(args)...);
         int ret = LUA_OK;
         if ((ret = lua_call(L, sizeof...(args), pop<RVal>::nresult)) != LUA_OK) {
-            std::cout << "调用lua4函数失败: " << ret << std::endl;
-            return 0;
+            std::cerr << "调用lua4函数失败: " << ret << std::endl;
+            lua_pushnil(L);
         }
         return pop<RVal>::apply(L);
     }
@@ -220,7 +222,8 @@ namespace lua4tinker {
         lua_getglobal(L, name);
         if (lua_isfunction(L, -1) == false) {
             lua_pop(L, 1);
-            assert(!"所调用的不是函数");
+            std::cerr << "调用lua4函数失败: " << name << "不存在 (或者不是一个函数)" << std::endl;
+            return RVal();  // 暂时用这个代替 等需要多返回值的时候再修改
         } else {
             return call_stackfunc<RVal>(L, std::forward<Args>(args)...);
         }

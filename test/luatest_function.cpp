@@ -36,7 +36,7 @@ int main() {
         end 
     )");
 
-    if (lua4tinker::call<int>(L, "max", 1, 2) != 2) {
+    if (lua4tinker::call<int>(L, "max", 1, std::string("2d"), 3) != 2) {
         return 1;
     }
 
