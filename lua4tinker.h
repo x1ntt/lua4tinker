@@ -12,6 +12,8 @@ extern "C" {
 #include <concepts>
 #include <typeinfo>
 #include <functional>
+#include <string>
+#include <iostream>
 
 namespace lua4tinker {
 
@@ -159,14 +161,27 @@ namespace lua4tinker {
             }
             return 0;
         }
+
+        // template <typename T>
+        static int gc(lua_State *L) {
+            auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
+            pThis->~FuncWarpType();
+            std::cout << "gc 调用析构函数" << std::endl;
+            return 0;
+        }
     };
 
     template <typename R, typename... Args>
     void push_functor(lua_State *L, const char *name, R(func)(Args...)) {
-        // 创建用户数据，将函数包裹器置入lua内存（以便利用lua的垃圾回收析构Functor对象）TODO
+        // 创建用户数据，将函数包裹器置入lua内存（以便利用lua的垃圾回收析构Functor对象）
         using Functor_wrap = functor<R, Args...>;
         new (lua_newuserdata(L, sizeof(Functor_wrap))) Functor_wrap(name, func);    // 使用lua的内存存放函数包裹器
-        
+
+        // 当lua4垃圾回收时回调
+        int tag = lua_newtag(L);
+        lua_pushcfunction(L, &Functor_wrap::gc);
+        lua_settagmethod(L, tag, "gc");
+
         lua_pushcclosure(L, &Functor_wrap::invoke, 1);
     }
 
