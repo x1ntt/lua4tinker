@@ -48,7 +48,8 @@
         "streambuf": "cpp"
     },
     "C_Cpp.default.includePath": [
-        "lua-4.0.1/include"
+        "lua-4.0.1/include",
+        "."
     ],
     "C_Cpp.default.cppStandard": "gnu++20"
 }
