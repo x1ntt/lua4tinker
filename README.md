@@ -21,3 +21,8 @@ int int_val2 = lua4tinker::get<int>(L, "int_val2");
 lua4tinker::def(L, "cpp_sum", sum); // lua4 调用 cpp 函数
 lua4tinker::call<int>(L, "max", 1, 2);   // cpp 调用 lua4 函数
 ```
+
+## Todo
+
++ 针对变量边界的检查
++ 创建
