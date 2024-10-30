@@ -1,8 +1,26 @@
 #include <iostream>
 #include "lua4tinker.h"
 
+class A {
+private:
+    int _a;
+public:
+    A(int a) : _a(a) {}
+    
+    int p() {
+        std::cout << "_a: " << _a << std::endl;
+        return 0;
+    };
+};
+
 int table_func(lua_State *L) {
     std::cout << "table_func" << std::endl;
+    return 0;
+}
+
+int index_func(lua_State *L) {
+    std::cout << "index_func: lua_gettop=" << lua_gettop(L) << std::endl;
+    lua4tinker::enum_stack(L);
     return 0;
 }
 
@@ -24,6 +42,13 @@ int main() {
     lua_pushcfunction(L, table_func);
     lua_settable(L, 1);
 
+    // index tag method
+    int index_tag = lua_newtag(L);
+    lua_pushcfunction(L, index_func);
+    lua_settagmethod(L, index_tag, "index");
+
+    lua_settag(L, index_tag);
+    
     lua_setglobal(L, "student");
 
     int ret =  lua4tinker::do_string(L, R"(
@@ -31,6 +56,7 @@ int main() {
         print (student['age'])
         print (student['name'])
         student:func()
+        cc=student['cc']
     )");
 
     return ret;

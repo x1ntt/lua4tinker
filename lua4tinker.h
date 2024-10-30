@@ -46,6 +46,19 @@ namespace lua4tinker {
         ~stack_delay_pop() { lua_pop(L, pop_num); }
     };
 
+    void enum_stack(lua_State *L) {
+        int stack_count = lua_gettop(L);
+        for (; stack_count>0; stack_count--) {
+            if (lua_isnumber(L,stack_count)) {
+                std::cout << "index(" << stack_count << ") = " << lua_tonumber(L, stack_count) << std::endl;
+            }else if (lua_isstring(L,stack_count)) {
+                std::cout << "index(" << stack_count << ") = " << lua_tostring(L, stack_count) << std::endl;
+            }else {
+                std::cout << "index(" << stack_count << ") = lua_type: " << lua_type(L, stack_count) << std::endl;
+            }
+        }
+    }
+
     // Helper Function End
 
     template <typename T>
