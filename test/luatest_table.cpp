@@ -23,6 +23,18 @@ int index_func(lua_State *L) {
     lua4tinker::enum_stack(L);
     return 0;
 }
+/*
+    index 方法 栈枚举结果
+        index_func: lua_gettop=2
+        index(2) = cc
+        index(1) = lua_type: 4
+    
+    settable 方法 栈枚举结果
+        index_func: lua_gettop=3
+        index(3, LUA_TSTRING) = 123
+        index(2, LUA_TSTRING) = cc
+        index(1, LUA_TTABLE)
+*/
 
 int main() {
     lua_State * L = lua4tinker::new_state();
@@ -45,7 +57,7 @@ int main() {
     // index tag method
     int index_tag = lua_newtag(L);
     lua_pushcfunction(L, index_func);
-    lua_settagmethod(L, index_tag, "index");
+    lua_settagmethod(L, index_tag, "settable");
 
     lua_settag(L, index_tag);
     
@@ -56,7 +68,10 @@ int main() {
         print (student['age'])
         print (student['name'])
         student:func()
-        cc=student['cc']
+        print ("settable: ")
+        student['cc'] = "123"
+        print ("index: ")
+        cc = student['cc']
     )");
 
     return ret;

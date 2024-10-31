@@ -49,10 +49,18 @@ namespace lua4tinker {
     void enum_stack(lua_State *L) {
         int stack_count = lua_gettop(L);
         for (; stack_count>0; stack_count--) {
-            if (lua_isnumber(L,stack_count)) {
-                std::cout << "index(" << stack_count << ") = " << lua_tonumber(L, stack_count) << std::endl;
-            }else if (lua_isstring(L,stack_count)) {
-                std::cout << "index(" << stack_count << ") = " << lua_tostring(L, stack_count) << std::endl;
+            if (lua_type(L,stack_count) == LUA_TNUMBER) {
+                std::cout << "index(" << stack_count << ", LUA_TNUMBER) = " << lua_tonumber(L, stack_count) << std::endl;
+            }else if (lua_type(L,stack_count) == LUA_TSTRING) {
+                std::cout << "index(" << stack_count << ", LUA_TSTRING) = " << lua_tostring(L, stack_count) << std::endl;
+            }else if (lua_type(L,stack_count) == LUA_TTABLE) {
+                std::cout << "index(" << stack_count << ", LUA_TTABLE)" << std::endl;
+            }else if (lua_type(L,stack_count) == LUA_TNIL) {
+                std::cout << "index(" << stack_count << ", LUA_TNIL)" << std::endl;
+            }else if (lua_type(L,stack_count) == LUA_TUSERDATA) {
+                std::cout << "index(" << stack_count << ", LUA_TUSERDATA)" << std::endl;
+            }else if (lua_type(L,stack_count) == LUA_TFUNCTION) {
+                std::cout << "index(" << stack_count << ", LUA_TFUNCTION)" << std::endl;
             }else {
                 std::cout << "index(" << stack_count << ") = lua_type: " << lua_type(L, stack_count) << std::endl;
             }
