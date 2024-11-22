@@ -11,11 +11,16 @@ extern "C" {
 #include <cassert>
 #include <concepts>
 #include <typeinfo>
+#include <cxxabi.h>
 #include <functional>
 #include <string>
 #include <iostream>
 
 namespace lua4tinker {
+
+    using std::cout;
+    using std::endl;
+    using std::cerr;
 
     // 用于获取lua_pushcclosure附带的upvalue索引, index为想要获取的upvalue索引，n为upvalues的数量
     #define lua_upvalueindex(index, n) (index-(n+1))
@@ -23,8 +28,11 @@ namespace lua4tinker {
     // 补充 error codes for lua_do*
     #define LUA_OK  0
 
+    int luaclass_tag = -1;
     lua_State *new_state(size_t size = 8192) {
-        return lua_open (size);
+        lua_State *L = lua_open (size);
+        luaclass_tag = lua_newtag(L);
+        return L;
     }
 
     void open_libs(lua_State *L) {
@@ -77,6 +85,24 @@ namespace lua4tinker {
         }
         static T read(lua_State *L, size_t index) {
             return std::make_optional<T>;
+        }
+    };
+
+    class LuaClass {
+    public:
+        LuaClass(const char *object_name) : _object_name(object_name) {};
+        const char *_object_name;
+    };
+
+    template <>
+    struct stack_helper<LuaClass> {
+        static void push(lua_State *L, LuaClass && val) {
+            lua_getglobal(L, val._object_name);
+            cout << "push luaclass: " << val._object_name << endl;
+            if (!lua_istable(L, -1)) {
+                std::cerr << "对象 "<< val._object_name <<" 不存在, 需要先定义对象" << std::endl;
+                assert(!"对象不存在");
+            }
         }
     };
 
@@ -245,6 +271,23 @@ namespace lua4tinker {
         return pop<RVal>::apply(L);
     }
 
+    int mem_set_tag_func(lua_State *L) {
+        cout << "mem_set_tag_func" << endl;
+        enum_stack(L);
+        return 0;
+    }
+
+    int mem_get_tag_func(lua_State *L) {
+        cout << "mem_get_tag_func" << endl;
+        enum_stack(L);
+        return 0;
+    }
+
+    int index_tag_func(lua_State *L) {
+        cout << "index_tag_func" << endl;
+        enum_stack(L);
+        return 0;
+    }
     
     // 使用接口
     template <typename Func>
@@ -276,6 +319,26 @@ namespace lua4tinker {
         lua_getglobal(L, name);
         stack_delay_pop tmp(L, 1);
         return read<T>(L, 1);
+    }
+
+    template <typename T>
+    void class_object(lua_State *L, const char *object_name, T *ptr) {
+        // 创建一个表
+        lua_newtable(L);
+
+        lua_pushcfunction(L, mem_set_tag_func); // 这里使用 cclose 带上ptr是否可行？当然，应该需要userdata包裹一层
+        lua_settagmethod(L, luaclass_tag, "settable");
+        lua_settag(L, luaclass_tag);
+
+        lua_pushcfunction(L, mem_get_tag_func);
+        lua_settagmethod(L, luaclass_tag, "gettable");
+        lua_settag(L, luaclass_tag);
+
+        lua_pushcfunction(L, index_tag_func);
+        lua_settagmethod(L, luaclass_tag, "index");
+        lua_settag(L, luaclass_tag);
+
+        lua_setglobal(L, object_name);
     }
 }
 
