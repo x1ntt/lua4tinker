@@ -271,14 +271,39 @@ namespace lua4tinker {
         return pop<RVal>::apply(L);
     }
 
+    struct base_var {
+        virtual void get(lua_State *L) = 0;
+        virtual void set(lua_State *L) = 0;
+    };
+
+    template <typename CLASS_T, typename MEM_T>
+    struct mem_var : base_var {
+        mem_var(MEM_T CLASS_T::* val_ptr) : _val_ptr(val_ptr) {}
+        CLASS_T *_this_ptr;             // 对象地址
+        MEM_T CLASS_T::* _val_ptr;      // 成员变量指针
+
+        void get(lua_State *L) {    // lua从cpp侧取数据
+            auto &var = _this_ptr->*(_val_ptr);
+            push(L, var);
+        };
+        void set(lua_State *L) {
+            _this_ptr->*(_val_ptr) = read<MEM_T>(L, 1);
+        };
+    };
+
     int mem_set_tag_func(lua_State *L) {
-        cout << "mem_set_tag_func" << endl;
+        cout << "mem_set_tag_func" << lua_touserdata(L, lua_upvalueindex(1, 1)) << endl;
         enum_stack(L);
+        auto *this_ptr = (base_var*)lua_touserdata(L, lua_upvalueindex(1, 1));
+        // 1. table
+        // 2. mem_name  成员名
+        // 3. mem_var   对象指针
+
         return 0;
     }
 
     int mem_get_tag_func(lua_State *L) {
-        cout << "mem_get_tag_func" << endl;
+        cout << "mem_get_tag_func" << lua_touserdata(L, lua_upvalueindex(1, 1)) << endl;
         enum_stack(L);
         return 0;
     }
@@ -326,11 +351,15 @@ namespace lua4tinker {
         // 创建一个表
         lua_newtable(L);
 
-        lua_pushcfunction(L, mem_set_tag_func); // 这里使用 cclose 带上ptr是否可行？当然，应该需要userdata包裹一层
+        cout << "[class_object] " << ptr << endl;
+
+        lua_pushuserdata(L, ptr);
+        lua_pushcclosure(L, mem_set_tag_func, 1); // lua_pushcclosure会清除掉upvalues
         lua_settagmethod(L, luaclass_tag, "settable");
         lua_settag(L, luaclass_tag);
 
-        lua_pushcfunction(L, mem_get_tag_func);
+        lua_pushuserdata(L, ptr);
+        lua_pushcclosure(L, mem_get_tag_func, 1);
         lua_settagmethod(L, luaclass_tag, "gettable");
         lua_settag(L, luaclass_tag);
 
@@ -339,6 +368,18 @@ namespace lua4tinker {
         lua_settag(L, luaclass_tag);
 
         lua_setglobal(L, object_name);
+    }
+
+    template <typename BASE, typename VAR>
+    void class_object_mem(lua_State *L, const char *object_name, const char *mem_var_name, VAR BASE::*var_ptr) {
+        lua_getglobal(L, object_name);
+        if (lua_type(L, 1) == LUA_TTABLE) {
+            lua_pushstring(L, mem_var_name);
+            new (lua_newuserdata(L, sizeof(mem_var<BASE, VAR>))) mem_var<BASE, VAR>(var_ptr);
+            lua_rawset(L, -3);
+        }else {
+            assert(!"需要事先通过class_object定义对象");
+        }
     }
 }
 
