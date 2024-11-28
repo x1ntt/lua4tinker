@@ -5,13 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-          "name": "C++ Launch",
+          "name": "Launch Current",
           "type": "cppdbg",
           "request": "launch",
           "program": "${workspaceRoot}/build/test/${fileBasenameNoExtension}",
           "cwd": "${workspaceRoot}",
           "externalConsole": false,
           "MIMode": "gdb",
+          "preLaunchTask": "BuildCurrnet",
           "logging": {
             "moduleLoad": false,
             "trace": true

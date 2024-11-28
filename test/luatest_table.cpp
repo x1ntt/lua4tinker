@@ -72,12 +72,10 @@ int main() {
         student['cc'] = "123"
         print ("index: ")
         cc = student['cc']
+
+        local tm = gettagmethod(tag(student), "settable")
+        print (tm)
     )");
 
     return ret;
 }
-
-/*
-    定义成员变量：class_var_def(L, &object, object.var1);
-    定义函数：class_func_def(L, &object, T::func);
-*/

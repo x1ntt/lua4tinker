@@ -11,11 +11,16 @@ extern "C" {
 #include <cassert>
 #include <concepts>
 #include <typeinfo>
+#include <cxxabi.h>
 #include <functional>
 #include <string>
 #include <iostream>
 
 namespace lua4tinker {
+
+    using std::cout;
+    using std::endl;
+    using std::cerr;
 
     // 用于获取lua_pushcclosure附带的upvalue索引, index为想要获取的upvalue索引，n为upvalues的数量
     #define lua_upvalueindex(index, n) (index-(n+1))
@@ -23,8 +28,11 @@ namespace lua4tinker {
     // 补充 error codes for lua_do*
     #define LUA_OK  0
 
+    int luaclass_tag = -1;
     lua_State *new_state(size_t size = 8192) {
-        return lua_open (size);
+        lua_State *L = lua_open (size);
+        luaclass_tag = lua_newtag(L);
+        return L;
     }
 
     void open_libs(lua_State *L) {
@@ -58,7 +66,7 @@ namespace lua4tinker {
             }else if (lua_type(L,stack_count) == LUA_TNIL) {
                 std::cout << "index(" << stack_count << ", LUA_TNIL)" << std::endl;
             }else if (lua_type(L,stack_count) == LUA_TUSERDATA) {
-                std::cout << "index(" << stack_count << ", LUA_TUSERDATA)" << std::endl;
+                std::cout << "index(" << stack_count << ", LUA_TUSERDATA) = " << (void*)lua_touserdata(L, stack_count) << std::endl;
             }else if (lua_type(L,stack_count) == LUA_TFUNCTION) {
                 std::cout << "index(" << stack_count << ", LUA_TFUNCTION)" << std::endl;
             }else {
@@ -77,6 +85,24 @@ namespace lua4tinker {
         }
         static T read(lua_State *L, size_t index) {
             return std::make_optional<T>;
+        }
+    };
+
+    class LuaClass {
+    public:
+        LuaClass(const char *object_name) : _object_name(object_name) {};
+        const char *_object_name;
+    };
+
+    template <>
+    struct stack_helper<LuaClass> {
+        static void push(lua_State *L, LuaClass && val) {
+            lua_getglobal(L, val._object_name);
+            // cout << "push luaclass: " << val._object_name << endl;
+            if (!lua_istable(L, -1)) {
+                std::cerr << "对象 "<< val._object_name <<" 不存在, 需要先定义对象" << std::endl;
+                assert(!"对象不存在");
+            }
         }
     };
 
@@ -119,12 +145,12 @@ namespace lua4tinker {
 
     template <typename T>
     void push(lua_State *L, T &&val) {
-        stack_helper<T>::push(L, std::forward<T>(val));
+        stack_helper<std::decay_t<T>>::push(L, std::forward<std::decay_t<T>>(val));
     }
 
     template <typename T>
     T read(lua_State *L, size_t index) {
-        return stack_helper<T>::read(L, index);
+        return stack_helper<std::decay_t<T>>::read(L, index);
     }
 
     // Function
@@ -245,6 +271,57 @@ namespace lua4tinker {
         return pop<RVal>::apply(L);
     }
 
+    struct base_var {
+        virtual void get(lua_State *L) = 0;
+        virtual void set(lua_State *L) = 0;
+    };
+
+    template <typename CLASS_T, typename MEM_T>
+    struct mem_var : base_var {
+        mem_var(MEM_T CLASS_T::* val_ptr, CLASS_T *this_ptr) : _val_ptr(val_ptr), _this_ptr(this_ptr) {
+            // cout << "[mem_var] 构造mem_var: " << (void*)this << ", _this_ptr: " << (void*)_this_ptr << endl;
+        }
+        CLASS_T *_this_ptr;             // 对象地址
+        MEM_T CLASS_T::* _val_ptr;      // 成员变量指针
+
+        void get(lua_State *L) {    // lua从cpp侧取数据
+            push(L, _this_ptr->*(_val_ptr));
+        };
+        void set(lua_State *L) {
+            _this_ptr->*(_val_ptr) = read<MEM_T>(L, 3);
+        };
+    };
+
+    int mem_set_tag_func(lua_State *L) {
+        // cout << "mem_set_tag_func" << endl;
+        // enum_stack(L);
+        lua_pushvalue(L, 2);
+        lua_rawget(L, 1);
+
+        auto *mem_var_ptr = (base_var*)lua_touserdata(L, -1);
+        if (mem_var_ptr) {
+            mem_var_ptr->set(L);
+        }else {
+            cerr << "[error] 未定义成员"<< lua_tostring(L, 2) <<"变量到lua" << endl;
+        }
+        return 0;
+    }
+
+    int mem_get_tag_func(lua_State *L) {
+        // cout << "mem_get_tag_func" << endl;
+        // enum_stack(L);
+        lua_pushvalue(L, 2);
+        lua_rawget(L, 1);
+        auto *mem_var_ptr = (base_var*)lua_touserdata(L, -1);
+        mem_var_ptr->get(L);    // push 结果到栈上去
+        return 1;
+    }
+
+    int index_tag_func(lua_State *L) {
+        cerr << "index_tag_func 未定义变量或方法: " << lua_tostring(L, 2) << endl;
+        enum_stack(L);
+        return 0;
+    }
     
     // 使用接口
     template <typename Func>
@@ -276,6 +353,40 @@ namespace lua4tinker {
         lua_getglobal(L, name);
         stack_delay_pop tmp(L, 1);
         return read<T>(L, 1);
+    }
+
+    template <typename T>
+    void class_object(lua_State *L, const char *object_name, T *object_ptr) {
+        // 创建一个表
+        lua_newtable(L);
+
+        // cout << "[class_object] " << object_ptr << endl;
+
+        lua_pushcfunction(L, mem_set_tag_func);
+        lua_settagmethod(L, luaclass_tag, "settable");
+        lua_settag(L, luaclass_tag);
+
+        lua_pushcfunction(L, mem_get_tag_func);
+        lua_settagmethod(L, luaclass_tag, "gettable");
+        lua_settag(L, luaclass_tag);
+
+        lua_pushcfunction(L, index_tag_func);
+        lua_settagmethod(L, luaclass_tag, "index");
+        lua_settag(L, luaclass_tag);
+
+        lua_setglobal(L, object_name);
+    }
+
+    template <typename BASE, typename VAR>
+    void class_object_mem(lua_State *L, BASE *object_ptr, const char *object_name, VAR BASE::*mem_var_ptr, const char *mem_var_name) {
+        lua_getglobal(L, object_name);
+        if (lua_type(L, 1) == LUA_TTABLE) {
+            lua_pushstring(L, mem_var_name);
+            new (lua_newuserdata(L, sizeof(mem_var<BASE, VAR>))) mem_var<BASE, VAR>(mem_var_ptr, object_ptr);
+            lua_rawset(L, -3);
+        }else {
+            assert(!"需要事先通过class_object定义对象");
+        }
     }
 }
 

@@ -25,4 +25,3 @@ lua4tinker::call<int>(L, "max", 1, 2);   // cpp 调用 lua4 函数
 ## Todo
 
 + 针对变量边界的检查
-+ 创建
