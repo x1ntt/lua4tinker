@@ -1,14 +1,22 @@
 #include <iostream>
+#include <string>
 #include "lua4tinker.h"
 
 using std::cout;
 using std::endl;
+using std::string;
 
 class A
 {
 public:
-    A(int _a) : a(_a) {}
-    int a;
+    A(int a) : _a(a) {}
+    int _a;
+    string _str;
+    float _flt;
+
+    void dump() {
+        cout << "a: " << _a << endl;
+    }
 };
 
 int sum(int a) {
@@ -24,20 +32,30 @@ int main() {
     lua4tinker::def(L, "sum", sum);
 
     lua4tinker::do_string(L, R"(
-        function call_by_cpp(a_object)
-            a_object['a'] = 123
-            print (a_object['a'])
-            return 0
+        function call_by_cpp(a_object, int_val, str_val, float_val)
+            a_object['_a'] = int_val
+            a_object['_str'] = str_val
+            a_object['_flt'] = float_val
+            a_object['_not_exist'] = 233
+            print (a_object['_a'])
+            print (a_object['_str'])
+            print (a_object['_flt'])
+            return a_object['_a']
         end
     )");
 
-    A a(2);
-    lua4tinker::class_object<A>(L, "a", &a);
-    lua4tinker::class_object_mem<A>(L, "a", "a", &A::a);
+    A a_object(2);
+    lua4tinker::class_object<A>(L, "a_object", &a_object);
+    lua4tinker::class_object_mem<A>(L, &a_object, "a_object", &A::_a, "_a");
+    lua4tinker::class_object_mem<A>(L, &a_object, "a_object", &A::_str, "_str");
+    lua4tinker::class_object_mem<A>(L, &a_object, "a_object", &A::_flt, "_flt");
 
-    if (lua4tinker::call<int>(L, "call_by_cpp", lua4tinker::LuaClass("a")) != 0) {
+    int int_val = 123;
+    if (lua4tinker::call<int>(L, "call_by_cpp", lua4tinker::LuaClass("a_object"), int_val, string("Hello, Object!"), 233.233) != int_val) {
         return 1;
     }
+    a_object.dump();
+    return 0;
 }
 
 /*
