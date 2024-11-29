@@ -54,6 +54,17 @@ namespace lua4tinker {
         ~stack_delay_pop() { lua_pop(L, pop_num); }
     };
 
+    struct stack_scope_exit {
+        lua_State* L;
+        size_t    nTop;
+        explicit stack_scope_exit(lua_State* _L) : L(_L) {
+            nTop = lua_gettop(L);
+        }
+        ~stack_scope_exit() { 
+            lua_settop(L, nTop); 
+        }
+    };
+
     void enum_stack(lua_State *L) {
         int stack_count = lua_gettop(L);
         for (; stack_count>0; stack_count--) {
@@ -292,6 +303,10 @@ namespace lua4tinker {
         };
     };
 
+    struct base_func {
+        int32_t apply(lua_State* L) {};
+    };
+
     int mem_set_tag_func(lua_State *L) {
         // cout << "mem_set_tag_func" << endl;
         // enum_stack(L);
@@ -309,16 +324,23 @@ namespace lua4tinker {
 
     int mem_get_tag_func(lua_State *L) {
         // cout << "mem_get_tag_func" << endl;
-        // enum_stack(L);
+        enum_stack(L);
         lua_pushvalue(L, 2);
         lua_rawget(L, 1);
+        enum_stack(L);
         auto *mem_var_ptr = (base_var*)lua_touserdata(L, -1);
-        mem_var_ptr->get(L);    // push 结果到栈上去
+        if (mem_var_ptr) {
+            mem_var_ptr->get(L);    // push 结果到栈上去
+            return 1;
+        }
+
+        // 当表设置了gettable tag方法的时候，如果返回0，会导致表值中的方法调用失败（这里会给lua返回nil）
+        // 所以这里返回1，以便lua可以拿到表值中的方法
         return 1;
     }
 
-    int index_tag_func(lua_State *L) {
-        cerr << "index_tag_func 未定义变量或方法: " << lua_tostring(L, 2) << endl;
+    int mem_function_call_func(lua_State *L) {
+        cerr << "mem_function_call_func " << endl;
         enum_stack(L);
         return 0;
     }
@@ -370,19 +392,35 @@ namespace lua4tinker {
         lua_settagmethod(L, luaclass_tag, "gettable");
         lua_settag(L, luaclass_tag);
 
-        lua_pushcfunction(L, index_tag_func);
-        lua_settagmethod(L, luaclass_tag, "index");
-        lua_settag(L, luaclass_tag);
+        // lua_pushcfunction(L, mem_function_tag_func);
+        // lua_settagmethod(L, luaclass_tag, "function");
+        // lua_settag(L, luaclass_tag);
 
         lua_setglobal(L, object_name);
     }
 
     template <typename BASE, typename VAR>
     void class_object_mem(lua_State *L, BASE *object_ptr, const char *object_name, VAR BASE::*mem_var_ptr, const char *mem_var_name) {
+        stack_scope_exit scope_exit(L);
         lua_getglobal(L, object_name);
         if (lua_type(L, 1) == LUA_TTABLE) {
             lua_pushstring(L, mem_var_name);
             new (lua_newuserdata(L, sizeof(mem_var<BASE, VAR>))) mem_var<BASE, VAR>(mem_var_ptr, object_ptr);
+            lua_rawset(L, -3);
+        }else {
+            assert(!"需要事先通过class_object定义对象");
+        }
+    }
+
+    template <typename BASE, typename FUNC>
+    void class_object_func(lua_State *L, BASE *object_ptr, const char *object_name, FUNC && mem_func_ptr, const char *mem_func_name) {
+        stack_scope_exit scope_exit(L);
+        lua_getglobal(L, object_name);
+        if (lua_type(L, 1) == LUA_TTABLE) {
+            lua_pushstring(L, mem_func_name);
+            new (lua_newuserdata(L, sizeof(base_func))) base_func();
+            lua_pushcfunction(L, mem_function_call_func);
+            enum_stack(L);
             lua_rawset(L, -3);
         }else {
             assert(!"需要事先通过class_object定义对象");

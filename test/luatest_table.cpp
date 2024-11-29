@@ -21,7 +21,9 @@ int table_func(lua_State *L) {
 int index_func(lua_State *L) {
     std::cout << "index_func: lua_gettop=" << lua_gettop(L) << std::endl;
     lua4tinker::enum_stack(L);
-    return 0;
+    lua_pushvalue(L, 2);
+    lua_rawget(L, 1);
+    return 1;
 }
 /*
     index 方法 栈枚举结果
@@ -57,7 +59,7 @@ int main() {
     // index tag method
     int index_tag = lua_newtag(L);
     lua_pushcfunction(L, index_func);
-    lua_settagmethod(L, index_tag, "settable");
+    lua_settagmethod(L, index_tag, "gettable");
 
     lua_settag(L, index_tag);
     
