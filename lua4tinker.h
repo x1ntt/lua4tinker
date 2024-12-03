@@ -160,7 +160,7 @@ namespace lua4tinker {
     }
 
     template <typename T>
-    T read(lua_State *L, size_t index) {
+    T read(lua_State *L, int index) {
         return stack_helper<std::decay_t<T>>::read(L, index);
     }
 
@@ -178,6 +178,21 @@ namespace lua4tinker {
     {
         return direct_invoke_invoke_helper<nIdxParams, RVal, Func, Args...>(std::forward<Func>(func),
             L,
+            std::make_index_sequence<sizeof...(Args)>{});
+    }
+
+    template<int32_t nIdxParams, typename RET_T, typename Func, typename CLASS_T, typename... Args, std::size_t... index>
+    RET_T direct_invoke_invoke_helper(Func&& func, lua_State* L, CLASS_T* object_ptr, std::index_sequence<index...>)
+    {
+        return func(object_ptr, read<Args>(L, index + nIdxParams)...);
+    }
+
+    template<int32_t nIdxParams, typename RET_T, typename Func, typename CLASS_T, typename... Args>
+    RET_T direct_invoke_member_func(Func&& func, lua_State* L, CLASS_T* object_ptr)
+    {
+        return direct_invoke_invoke_helper<nIdxParams, RET_T, Func, CLASS_T, Args...>(std::forward<Func>(func),
+            L,
+            object_ptr,
             std::make_index_sequence<sizeof...(Args)>{});
     }
 
@@ -227,6 +242,28 @@ namespace lua4tinker {
             std::cout << "gc 调用析构函数" << std::endl;
             return 0;
         }
+    };
+
+    template <typename CLASS_T, typename RET_T, typename... Args>
+    struct mem_func : public functor_base {
+        using FuncWarpType = mem_func<CLASS_T, RET_T, Args...>;
+        typedef std::function<RET_T(CLASS_T*, Args...)> FunctionType;
+
+        FunctionType _func;
+        std::string _mem_func_name;
+        CLASS_T *_object_ptr;
+        mem_func (FunctionType && func, const char *mem_func_name, CLASS_T *object_ptr) : _func(std::move(func)), _mem_func_name(mem_func_name), _object_ptr(object_ptr) { }
+        virtual int32_t apply(lua_State* L) {
+            if constexpr (std::is_void_v<RET_T>) {  // 无返回值
+                direct_invoke_member_func<2, RET_T, FunctionType, CLASS_T, Args...>(std::forward<FunctionType>(_func), L, _object_ptr);
+                return 0;
+            } else {    // 有返回值
+                push<RET_T>(L, direct_invoke_member_func<2, RET_T, FunctionType, CLASS_T, Args...>(std::forward<FunctionType>(_func), L, _object_ptr));
+                return 1;
+            }
+        };
+
+
     };
 
     template <typename R, typename... Args>
@@ -303,10 +340,6 @@ namespace lua4tinker {
         };
     };
 
-    struct base_func {
-        int32_t apply(lua_State* L) {};
-    };
-
     int mem_set_tag_func(lua_State *L) {
         // cout << "mem_set_tag_func" << endl;
         // enum_stack(L);
@@ -324,10 +357,9 @@ namespace lua4tinker {
 
     int mem_get_tag_func(lua_State *L) {
         // cout << "mem_get_tag_func" << endl;
-        enum_stack(L);
+        // enum_stack(L);
         lua_pushvalue(L, 2);
         lua_rawget(L, 1);
-        enum_stack(L);
         auto *mem_var_ptr = (base_var*)lua_touserdata(L, -1);
         if (mem_var_ptr) {
             mem_var_ptr->get(L);    // push 结果到栈上去
@@ -341,7 +373,18 @@ namespace lua4tinker {
 
     int mem_function_call_func(lua_State *L) {
         cerr << "mem_function_call_func " << endl;
-        enum_stack(L);
+        /*
+            index(3, LUA_TUSERDATA) = 0x448508
+            index(2, LUA_TNUMBER) = 123
+            index(1, LUA_TTABLE)
+        */
+        // enum_stack(L);
+
+        if (lua_type(L, lua_upvalueindex(1, 1) == LUA_TUSERDATA)) {
+            auto *mem_func = (functor_base*)lua_touserdata(L, lua_upvalueindex(1, 1));
+            lua_remove(L, lua_upvalueindex(1, 1));  // 移除upvalue
+            return mem_func->apply(L);
+        }
         return 0;
     }
     
@@ -412,15 +455,16 @@ namespace lua4tinker {
         }
     }
 
-    template <typename BASE, typename FUNC>
-    void class_object_func(lua_State *L, BASE *object_ptr, const char *object_name, FUNC && mem_func_ptr, const char *mem_func_name) {
+    template <typename CLASS_T, typename RET_T, typename... ARGS>
+    void class_object_func(lua_State *L, CLASS_T *object_ptr, const char *object_name, RET_T (CLASS_T::*func)(ARGS...), const char *mem_func_name) {
         stack_scope_exit scope_exit(L);
         lua_getglobal(L, object_name);
         if (lua_type(L, 1) == LUA_TTABLE) {
             lua_pushstring(L, mem_func_name);
-            new (lua_newuserdata(L, sizeof(base_func))) base_func();
-            lua_pushcfunction(L, mem_function_call_func);
-            enum_stack(L);
+            using FuncWarpType = mem_func<CLASS_T, RET_T, ARGS...>;
+            new (lua_newuserdata(L, sizeof(FuncWarpType))) FuncWarpType(func, mem_func_name, object_ptr);
+            lua_pushcclosure(L, mem_function_call_func, 1);
+            // enum_stack(L);
             lua_rawset(L, -3);
         }else {
             assert(!"需要事先通过class_object定义对象");
