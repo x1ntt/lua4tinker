@@ -439,6 +439,7 @@ namespace lua4tinker {
         // lua_settagmethod(L, luaclass_tag, "function");
         // lua_settag(L, luaclass_tag);
 
+
         lua_setglobal(L, object_name);
     }
 
