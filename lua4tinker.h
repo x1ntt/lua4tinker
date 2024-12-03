@@ -167,16 +167,16 @@ namespace lua4tinker {
     // Function
 
     // lua 调用 cpp 函数
-    template<int32_t nIdxParams, typename RVal, typename Func, typename... Args, std::size_t... index>
-    RVal direct_invoke_invoke_helper(Func&& func, lua_State* L, std::index_sequence<index...>)
+    template<int32_t nIdxParams, typename RET_T, typename Func, typename... Args, std::size_t... index>
+    RET_T direct_invoke_invoke_helper(Func&& func, lua_State* L, std::index_sequence<index...>)
     {
         return func(read<Args>(L, index + nIdxParams)...);
     }
     
-    template<int32_t nIdxParams, typename RVal, typename Func, typename... Args>
-    RVal direct_invoke_func(Func&& func, lua_State* L)
+    template<int32_t nIdxParams, typename RET_T, typename Func, typename... Args>
+    RET_T direct_invoke_func(Func&& func, lua_State* L)
     {
-        return direct_invoke_invoke_helper<nIdxParams, RVal, Func, Args...>(std::forward<Func>(func),
+        return direct_invoke_invoke_helper<nIdxParams, RET_T, Func, Args...>(std::forward<Func>(func),
             L,
             std::make_index_sequence<sizeof...(Args)>{});
     }
@@ -201,17 +201,17 @@ namespace lua4tinker {
         virtual int apply(lua_State *L) = 0;
     };
 
-    template <typename RVal, typename... Args>
+    template <typename RET_T, typename... Args>
     struct functor : functor_base {
-        typedef std::function<RVal(Args...)> FunctionType;
-        using FuncWarpType = functor<RVal, Args...>;
+        typedef std::function<RET_T(Args...)> FunctionType;
+        using FuncWarpType = functor<RET_T, Args...>;
         FunctionType       func;
         std::string        name;
 
         functor(const char *_name, FunctionType &&_func) : name(_name), func(_func) { };
 
         int apply(lua_State *L) {
-            return invoke_function<RVal, FunctionType>(L, std::forward<FunctionType>(func));
+            return invoke_function<FunctionType>(L, std::forward<FunctionType>(func));
         }
 
         static int invoke(lua_State *L) {
@@ -224,13 +224,13 @@ namespace lua4tinker {
             return pThis->apply(L);
         }
 
-        template <typename R, typename Func>
+        template <typename Func>
         static int invoke_function(lua_State *L, Func &&func) {
-            if constexpr (!std::is_void_v<R>) { // 函数有返回值，需要将返回值压栈
-                push<RVal>(L, direct_invoke_func<1, RVal, Func, Args...>(std::forward<Func>(func), L));
+            if constexpr (!std::is_void_v<RET_T>) { // 函数有返回值，需要将返回值压栈
+                push<RET_T>(L, direct_invoke_func<1, RET_T, Func, Args...>(std::forward<Func>(func), L));
                 return 1;
             }else {
-                direct_invoke_func<1, RVal, Func, Args...>(std::forward<Func>(func), L);
+                direct_invoke_func<1, RET_T, Func, Args...>(std::forward<Func>(func), L);
             }
             return 0;
         }
@@ -308,15 +308,15 @@ namespace lua4tinker {
         }
     };
 
-    template <typename RVal, typename... Args>
-    RVal call_stackfunc(lua_State *L, Args&&... args) {
+    template <typename RET_T, typename... Args>
+    RET_T call_stackfunc(lua_State *L, Args&&... args) {
         push_args(L, std::forward<Args>(args)...);
         int ret = LUA_OK;
-        if ((ret = lua_call(L, sizeof...(args), pop<RVal>::nresult)) != LUA_OK) {
+        if ((ret = lua_call(L, sizeof...(args), pop<RET_T>::nresult)) != LUA_OK) {
             std::cerr << "调用lua4函数失败: " << ret << std::endl;
             lua_pushnil(L);
         }
-        return pop<RVal>::apply(L);
+        return pop<RET_T>::apply(L);
     }
 
     struct base_var {
@@ -342,7 +342,6 @@ namespace lua4tinker {
 
     int mem_set_tag_func(lua_State *L) {
         // cout << "mem_set_tag_func" << endl;
-        // enum_stack(L);
         lua_pushvalue(L, 2);
         lua_rawget(L, 1);
 
@@ -357,7 +356,6 @@ namespace lua4tinker {
 
     int mem_get_tag_func(lua_State *L) {
         // cout << "mem_get_tag_func" << endl;
-        // enum_stack(L);
         lua_pushvalue(L, 2);
         lua_rawget(L, 1);
         auto *mem_var_ptr = (base_var*)lua_touserdata(L, -1);
@@ -395,15 +393,15 @@ namespace lua4tinker {
         lua_setglobal(L, name);
     }
 
-    template <typename RVal, typename... Args>
-    RVal call(lua_State *L, const char *name, Args &&... args) {
+    template <typename RET_T, typename... Args>
+    RET_T call(lua_State *L, const char *name, Args &&... args) {
         lua_getglobal(L, name);
         if (lua_isfunction(L, -1) == false) {
             lua_pop(L, 1);
             std::cerr << "调用lua4函数失败: " << name << "不存在 (或者不是一个函数)" << std::endl;
-            return RVal();  // 暂时用这个代替 等需要多返回值的时候再修改
+            return RET_T();  // 暂时用这个代替 等需要多返回值的时候再修改
         } else {
-            return call_stackfunc<RVal>(L, std::forward<Args>(args)...);
+            return call_stackfunc<RET_T>(L, std::forward<Args>(args)...);
         }
     }
 
@@ -425,8 +423,6 @@ namespace lua4tinker {
         // 创建一个表
         lua_newtable(L);
 
-        // cout << "[class_object] " << object_ptr << endl;
-
         lua_pushcfunction(L, mem_set_tag_func);
         lua_settagmethod(L, luaclass_tag, "settable");
         lua_settag(L, luaclass_tag);
@@ -435,21 +431,16 @@ namespace lua4tinker {
         lua_settagmethod(L, luaclass_tag, "gettable");
         lua_settag(L, luaclass_tag);
 
-        // lua_pushcfunction(L, mem_function_tag_func);
-        // lua_settagmethod(L, luaclass_tag, "function");
-        // lua_settag(L, luaclass_tag);
-
-
         lua_setglobal(L, object_name);
     }
 
-    template <typename BASE, typename VAR>
-    void class_object_mem(lua_State *L, BASE *object_ptr, const char *object_name, VAR BASE::*mem_var_ptr, const char *mem_var_name) {
+    template <typename CLASS_T, typename MEM_T>
+    void class_object_mem(lua_State *L, CLASS_T *object_ptr, const char *object_name, MEM_T CLASS_T::*mem_var_ptr, const char *mem_var_name) {
         stack_scope_exit scope_exit(L);
         lua_getglobal(L, object_name);
         if (lua_type(L, 1) == LUA_TTABLE) {
             lua_pushstring(L, mem_var_name);
-            new (lua_newuserdata(L, sizeof(mem_var<BASE, VAR>))) mem_var<BASE, VAR>(mem_var_ptr, object_ptr);
+            new (lua_newuserdata(L, sizeof(mem_var<CLASS_T, MEM_T>))) mem_var<CLASS_T, MEM_T>(mem_var_ptr, object_ptr);
             lua_rawset(L, -3);
         }else {
             assert(!"需要事先通过class_object定义对象");
@@ -465,7 +456,6 @@ namespace lua4tinker {
             using FuncWarpType = mem_func<CLASS_T, RET_T, ARGS...>;
             new (lua_newuserdata(L, sizeof(FuncWarpType))) FuncWarpType(func, mem_func_name, object_ptr);
             lua_pushcclosure(L, mem_function_call_func, 1);
-            // enum_stack(L);
             lua_rawset(L, -3);
         }else {
             assert(!"需要事先通过class_object定义对象");
