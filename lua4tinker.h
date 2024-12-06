@@ -209,6 +209,7 @@ namespace lua4tinker {
         std::string        name;
 
         functor(const char *_name, FunctionType &&_func) : name(_name), func(_func) { };
+        ~functor() {};
 
         int apply(lua_State *L) {
             return invoke_function<FunctionType>(L, std::forward<FunctionType>(func));
@@ -253,6 +254,7 @@ namespace lua4tinker {
         std::string _mem_func_name;
         CLASS_T *_object_ptr;
         mem_func (FunctionType && func, const char *mem_func_name, CLASS_T *object_ptr) : _func(std::move(func)), _mem_func_name(mem_func_name), _object_ptr(object_ptr) { }
+        ~mem_func () {}
         virtual int32_t apply(lua_State* L) {
             if constexpr (std::is_void_v<RET_T>) {  // 无返回值
                 direct_invoke_member_func<2, RET_T, FunctionType, CLASS_T, Args...>(std::forward<FunctionType>(_func), L, _object_ptr);
