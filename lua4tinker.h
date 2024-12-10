@@ -29,6 +29,7 @@ namespace lua4tinker {
     #define LUA_OK  0
 
     int luaclass_tag = -1;
+
     lua_State *new_state(size_t size = 8192) {
         lua_State *L = lua_open (size);
         luaclass_tag = lua_newtag(L);
@@ -45,6 +46,10 @@ namespace lua4tinker {
 
     int do_string(lua_State *L, const std::string & code) {
         return lua_dostring(L, code.c_str());
+    }
+
+    void dump_gc(lua_State *L) {
+        cout << "gc status (count/threshold): " << lua_getgccount(L) << "/" << lua_getgcthreshold(L) << endl;
     }
 
     struct stack_delay_pop {
@@ -208,8 +213,12 @@ namespace lua4tinker {
         FunctionType       func;
         std::string        name;
 
-        functor(const char *_name, FunctionType &&_func) : name(_name), func(_func) { };
-        ~functor() {};
+        functor(const char *_name, FunctionType &&_func) : name(_name), func(_func) {
+            // cout << "functor构造: " << (void*)this << endl;
+        };
+        ~functor() {
+            // cout << "functor析构: " << (void*)this << endl;
+        };
 
         int apply(lua_State *L) {
             return invoke_function<FunctionType>(L, std::forward<FunctionType>(func));
@@ -236,25 +245,33 @@ namespace lua4tinker {
             return 0;
         }
 
-        // template <typename T>
         static int gc(lua_State *L) {
             auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
             pThis->~FuncWarpType();
-            std::cout << "gc 调用析构函数" << std::endl;
             return 0;
+        }
+
+        static void setgc(lua_State *L) {
+            static int gc_tag = lua_newtag(L);
+            lua_pushcfunction(L, &FuncWarpType::gc);
+            lua_settagmethod(L, gc_tag, "gc");
         }
     };
 
     template <typename CLASS_T, typename RET_T, typename... Args>
-    struct mem_func : public functor_base {
-        using FuncWarpType = mem_func<CLASS_T, RET_T, Args...>;
+    struct mem_functor {
+        using FuncWarpType = mem_functor<CLASS_T, RET_T, Args...>;
         typedef std::function<RET_T(CLASS_T*, Args...)> FunctionType;
 
         FunctionType _func;
         std::string _mem_func_name;
         CLASS_T *_object_ptr;
-        mem_func (FunctionType && func, const char *mem_func_name, CLASS_T *object_ptr) : _func(std::move(func)), _mem_func_name(mem_func_name), _object_ptr(object_ptr) { }
-        ~mem_func () {}
+        mem_functor (FunctionType && func, const char *mem_func_name, CLASS_T *object_ptr) : _func(std::move(func)), _mem_func_name(mem_func_name), _object_ptr(object_ptr) {
+            // cout << "mem_functor构造: " << (void*)this << endl;
+        }
+        ~mem_functor () {
+            // cout << "mem_functor析构: " << (void*)this << endl;
+        }
         virtual int32_t apply(lua_State* L) {
             if constexpr (std::is_void_v<RET_T>) {  // 无返回值
                 direct_invoke_member_func<2, RET_T, FunctionType, CLASS_T, Args...>(std::forward<FunctionType>(_func), L, _object_ptr);
@@ -265,7 +282,27 @@ namespace lua4tinker {
             }
         };
 
+        static int invoke(lua_State *L) {
+            auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
+            if (pThis == nullptr) {
+                assert(!"拿取用户数据失败");
+                return 0;
+            }
+            return pThis->apply(L);
+        }
 
+        static int gc(lua_State *L) {
+            auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
+            pThis->~FuncWarpType();
+            return 0;
+        }
+
+        static void setgc(lua_State *L) {
+            static int gc_tag = lua_newtag(L);
+            lua_pushcfunction(L, &FuncWarpType::gc);
+            lua_settagmethod(L, gc_tag, "gc");
+            cout << "setgc: " << FuncWarpType::gc << endl;
+        }
     };
 
     template <typename R, typename... Args>
@@ -275,9 +312,7 @@ namespace lua4tinker {
         new (lua_newuserdata(L, sizeof(Functor_wrap))) Functor_wrap(name, func);    // 使用lua的内存存放函数包裹器
 
         // 当lua4垃圾回收时回调
-        int tag = lua_newtag(L);
-        lua_pushcfunction(L, &Functor_wrap::gc);
-        lua_settagmethod(L, tag, "gc");
+        Functor_wrap::setgc(L);
 
         lua_pushcclosure(L, &Functor_wrap::invoke, 1);
     }
@@ -370,23 +405,6 @@ namespace lua4tinker {
         // 所以这里返回1，以便lua可以拿到表值中的方法
         return 1;
     }
-
-    int mem_function_call_func(lua_State *L) {
-        cerr << "mem_function_call_func " << endl;
-        /*
-            index(3, LUA_TUSERDATA) = 0x448508
-            index(2, LUA_TNUMBER) = 123
-            index(1, LUA_TTABLE)
-        */
-        // enum_stack(L);
-
-        if (lua_type(L, lua_upvalueindex(1, 1) == LUA_TUSERDATA)) {
-            auto *mem_func = (functor_base*)lua_touserdata(L, lua_upvalueindex(1, 1));
-            lua_remove(L, lua_upvalueindex(1, 1));  // 移除upvalue
-            return mem_func->apply(L);
-        }
-        return 0;
-    }
     
     // 使用接口
     template <typename Func>
@@ -422,7 +440,7 @@ namespace lua4tinker {
 
     template <typename T>
     void class_object(lua_State *L, const char *object_name, T *object_ptr) {
-        // 创建一个表
+        // 创建一个表 需要调用者自行管理对象生命周期
         lua_newtable(L);
 
         lua_pushcfunction(L, mem_set_tag_func);
@@ -455,9 +473,10 @@ namespace lua4tinker {
         lua_getglobal(L, object_name);
         if (lua_type(L, 1) == LUA_TTABLE) {
             lua_pushstring(L, mem_func_name);
-            using FuncWarpType = mem_func<CLASS_T, RET_T, ARGS...>;
+            using FuncWarpType = mem_functor<CLASS_T, RET_T, ARGS...>;
             new (lua_newuserdata(L, sizeof(FuncWarpType))) FuncWarpType(func, mem_func_name, object_ptr);
-            lua_pushcclosure(L, mem_function_call_func, 1);
+            FuncWarpType::setgc(L);
+            lua_pushcclosure(L, &FuncWarpType::invoke, 1);
             lua_rawset(L, -3);
         }else {
             assert(!"需要事先通过class_object定义对象");

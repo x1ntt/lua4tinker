@@ -26,7 +26,7 @@ public:
 int main() {
     lua_State * L = lua4tinker::new_state();
     lua4tinker::open_libs(L);
-
+    lua4tinker::dump_gc(L);
     lua4tinker::do_string(L, R"(
         function call_by_cpp(a_object, int_val, str_val, float_val)
             a_object['_a'] = int_val
@@ -38,6 +38,16 @@ int main() {
             print (a_object['_flt'])
             print ("a_object:sum: "..a_object:sum(int_val, float_val))
             -- print (a_object(int_val))
+
+            local tables = {}
+            for i = 1, 10000 do
+                tables[i] = {i}
+            end
+
+            for i = 1, 10000 do
+                tables[i] = nil
+            end
+
             return a_object['_a']+a_object['_a']
         end
     )");
@@ -53,6 +63,9 @@ int main() {
     if (lua4tinker::call<int>(L, "call_by_cpp", lua4tinker::LuaClass("a_object"), int_val, string("Hello, Object!"), 233.233) != int_val*2) {
         return 1;
     }
+    // lua_setgcthreshold(L, 146);
+    // lua_close(L);
+    lua4tinker::dump_gc(L);
     a_object.dump();
     return 0;
 }
