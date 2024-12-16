@@ -53,11 +53,18 @@ int main() {
     )");
 
     A a_object(2);
-    lua4tinker::class_object<A>(L, "a_object", &a_object);
-    lua4tinker::class_object_mem<A>(L, &a_object, "a_object", &A::_a, "_a");
-    lua4tinker::class_object_mem<A>(L, &a_object, "a_object", &A::_str, "_str");
-    lua4tinker::class_object_mem<A>(L, &a_object, "a_object", &A::_flt, "_flt");
-    lua4tinker::class_object_func<A>(L, &a_object, "a_object", &A::sum, "sum");
+    // lua4tinker::object_def<A>(L, "a_object", &a_object);
+    // lua4tinker::object_mem_def<A>(L, &a_object, "a_object", &A::_a, "_a");
+    // lua4tinker::object_mem_def<A>(L, &a_object, "a_object", &A::_str, "_str");
+    // lua4tinker::object_mem_def<A>(L, &a_object, "a_object", &A::_flt, "_flt");
+    // lua4tinker::object_func_def<A>(L, &a_object, "a_object", &A::sum, "sum");
+    
+    // 如下宏展开为以上代码，如果期望lua中变量与cpp中变量名不同，需要使用上面的原始方法，否则建议使用宏函数
+    OBJECT_DEF(L, A, a_object);
+    OBJECT_MEM_DEF(L, A, a_object, _a);
+    OBJECT_MEM_DEF(L, A, a_object, _str);
+    OBJECT_MEM_DEF(L, A, a_object, _flt);
+    OBJECT_FUNC_DEF(L, A, a_object, sum);
 
     int int_val = 123;
     if (lua4tinker::call<int>(L, "call_by_cpp", lua4tinker::LuaClass("a_object"), int_val, string("Hello, Object!"), 233.233) != int_val*2) {

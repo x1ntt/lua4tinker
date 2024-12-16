@@ -22,6 +22,16 @@ namespace lua4tinker {
     using std::endl;
     using std::cerr;
 
+    // 简单日志实现
+    #define LOG_I(frm, args...) do {printf("[info_%s_%s][%s:%d] ", __DATE__ ,__TIME__, __FILE__, __LINE__); printf(frm, ##args); printf("\n");}while(0);   // 普通消息
+    #define LOG_W(frm, args...) do {printf("[warn_%s_%s][%s:%d] ", __DATE__ ,__TIME__, __FILE__, __LINE__); printf(frm, ##args); printf("\n");}while(0);   // 有错误但不影响程序运行
+    #define LOG_A(frm, args...) do {printf("[abort_%s_%s][%s:%d] ", __DATE__ ,__TIME__ ,__FILE__, __LINE__); printf(frm, ##args); printf("\n");assert(false);}while(0);  // 程序无法再运行
+
+    // 对象定义宏函数
+    #define OBJECT_DEF(L, TYPE, OBJECT_NAME) lua4tinker::object_def<TYPE>(L, #OBJECT_NAME, &OBJECT_NAME);
+    #define OBJECT_MEM_DEF(L, TYPE, OBJECT_NAME, MEM_NAME) lua4tinker::object_mem_def<TYPE>(L, &OBJECT_NAME, #OBJECT_NAME, &TYPE::MEM_NAME, #MEM_NAME);
+    #define OBJECT_FUNC_DEF(L, TYPE, OBJECT_NAME, FUNC_NAME) lua4tinker::object_func_def<TYPE>(L, &OBJECT_NAME, #OBJECT_NAME, &TYPE::FUNC_NAME, #FUNC_NAME);
+
     // 用于获取lua_pushcclosure附带的upvalue索引, index为想要获取的upvalue索引，n为upvalues的数量
     #define lua_upvalueindex(index, n) (index-(n+1))
 
@@ -49,7 +59,7 @@ namespace lua4tinker {
     }
 
     void dump_gc(lua_State *L) {
-        cout << "gc status (count/threshold): " << lua_getgccount(L) << "/" << lua_getgcthreshold(L) << endl;
+        LOG_I("gc status (count/threshold): %d/%d", lua_getgccount(L), lua_getgcthreshold(L));
     }
 
     struct stack_delay_pop {
@@ -72,23 +82,26 @@ namespace lua4tinker {
 
     void enum_stack(lua_State *L) {
         int stack_count = lua_gettop(L);
+        LOG_I("------------ enum_stack start, lua_gettop=%d ------------", stack_count);
         for (; stack_count>0; stack_count--) {
-            if (lua_type(L,stack_count) == LUA_TNUMBER) {
-                std::cout << "index(" << stack_count << ", LUA_TNUMBER) = " << lua_tonumber(L, stack_count) << std::endl;
-            }else if (lua_type(L,stack_count) == LUA_TSTRING) {
-                std::cout << "index(" << stack_count << ", LUA_TSTRING) = " << lua_tostring(L, stack_count) << std::endl;
-            }else if (lua_type(L,stack_count) == LUA_TTABLE) {
-                std::cout << "index(" << stack_count << ", LUA_TTABLE)" << std::endl;
-            }else if (lua_type(L,stack_count) == LUA_TNIL) {
-                std::cout << "index(" << stack_count << ", LUA_TNIL)" << std::endl;
-            }else if (lua_type(L,stack_count) == LUA_TUSERDATA) {
-                std::cout << "index(" << stack_count << ", LUA_TUSERDATA) = " << (void*)lua_touserdata(L, stack_count) << std::endl;
-            }else if (lua_type(L,stack_count) == LUA_TFUNCTION) {
-                std::cout << "index(" << stack_count << ", LUA_TFUNCTION)" << std::endl;
-            }else {
-                std::cout << "index(" << stack_count << ") = lua_type: " << lua_type(L, stack_count) << std::endl;
+            int lua_type_result = lua_type(L, stack_count);
+            if (lua_type_result == LUA_TNUMBER) {
+                LOG_I("index(%d, LUA_TNUMBER) = %f", stack_count, lua_tonumber(L, stack_count));
+            } else if (lua_type_result == LUA_TSTRING) {
+                LOG_I("index(%d, LUA_TSTRING) = %s", stack_count, lua_tostring(L, stack_count));
+            } else if (lua_type_result == LUA_TTABLE) {
+                LOG_I("index(%d, LUA_TTABLE)", stack_count);
+            } else if (lua_type_result == LUA_TNIL) {
+                LOG_I("index(%d, LUA_TNIL)", stack_count);
+            } else if (lua_type_result == LUA_TUSERDATA) {
+                LOG_I("index(%d, LUA_TUSERDATA) = %p", stack_count, (void*)lua_touserdata(L, stack_count));
+            } else if (lua_type_result == LUA_TFUNCTION) {
+                LOG_I("index(%d, LUA_TFUNCTION)", stack_count);
+            } else {
+                LOG_I("index(%d) = lua_type: %d", stack_count, lua_type_result);
             }
         }
+        LOG_I("------------ enum_stack end ------------");
     }
 
     // Helper Function End
@@ -97,7 +110,7 @@ namespace lua4tinker {
     struct stack_helper {
         static void push(lua_State *L, T && val) {
             std::cout << typeid(val).name() << std::endl;
-            assert(!"尚未处理的push");
+            LOG_A("尚未处理的push");
         }
         static T read(lua_State *L, size_t index) {
             return std::make_optional<T>;
@@ -116,8 +129,7 @@ namespace lua4tinker {
             lua_getglobal(L, val._object_name);
             // cout << "push luaclass: " << val._object_name << endl;
             if (!lua_istable(L, -1)) {
-                std::cerr << "对象 "<< val._object_name <<" 不存在, 需要先定义对象" << std::endl;
-                assert(!"对象不存在");
+                LOG_A("对象 %s 不存在, 需要预先定义对象", val._object_name);
             }
         }
     };
@@ -134,7 +146,8 @@ namespace lua4tinker {
                 size_t str_size = lua_strlen(L, index);
                 return std::string(str, str_size);
             }else {
-                std::cerr << "堆栈中不是字符串, 请检查参数类型是否正确" << std::endl;
+                std::cerr << "" << std::endl;
+                LOG_A("堆栈中不是字符串, 请检查参数类型是否正确");
             }
             return "";
         }
@@ -153,7 +166,7 @@ namespace lua4tinker {
             if (lua_type(L, index) == LUA_TNUMBER) {    // lua4中number包含数值和字符串型的数值
                 return (T)lua_tonumber(L, index);
             } else {
-                std::cerr << "堆栈中不是number, 请检查参数类型是否正确" << std::endl;
+                LOG_A("堆栈中不是number, 请检查参数类型是否正确");
             } 
             return (T)0; 
         }
@@ -228,7 +241,7 @@ namespace lua4tinker {
             // 这里会被注册给lua，从这里取出当前的函数包裹器，并获取参数并调用
             auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
             if (pThis == nullptr) {
-                assert(!"拿取用户数据失败");
+                LOG_A("拿取userdata失败");
                 return 0;
             }
             return pThis->apply(L);
@@ -285,7 +298,7 @@ namespace lua4tinker {
         static int invoke(lua_State *L) {
             auto pThis = (FuncWarpType*)lua_touserdata(L, lua_upvalueindex(1, 1));
             if (pThis == nullptr) {
-                assert(!"拿取用户数据失败");
+                LOG_A("拿取userdata失败");
                 return 0;
             }
             return pThis->apply(L);
@@ -301,7 +314,6 @@ namespace lua4tinker {
             static int gc_tag = lua_newtag(L);
             lua_pushcfunction(L, &FuncWarpType::gc);
             lua_settagmethod(L, gc_tag, "gc");
-            cout << "setgc: " << FuncWarpType::gc << endl;
         }
     };
 
@@ -350,7 +362,7 @@ namespace lua4tinker {
         push_args(L, std::forward<Args>(args)...);
         int ret = LUA_OK;
         if ((ret = lua_call(L, sizeof...(args), pop<RET_T>::nresult)) != LUA_OK) {
-            std::cerr << "调用lua4函数失败: " << ret << std::endl;
+            LOG_W("调用lua4函数失败: %d", ret);
             lua_pushnil(L);
         }
         return pop<RET_T>::apply(L);
@@ -386,7 +398,7 @@ namespace lua4tinker {
         if (mem_var_ptr) {
             mem_var_ptr->set(L);
         }else {
-            cerr << "[error] 未定义成员"<< lua_tostring(L, 2) <<"变量到lua" << endl;
+            LOG_W("未定义成员变量 %s 到lua", lua_tostring(L, 2));
         }
         return 0;
     }
@@ -418,7 +430,7 @@ namespace lua4tinker {
         lua_getglobal(L, name);
         if (lua_isfunction(L, -1) == false) {
             lua_pop(L, 1);
-            std::cerr << "调用lua4函数失败: " << name << "不存在 (或者不是一个函数)" << std::endl;
+            LOG_W("调用lua4函数失败, %s 不存在, 或者不是一个函数", name);
             return RET_T();  // 暂时用这个代替 等需要多返回值的时候再修改
         } else {
             return call_stackfunc<RET_T>(L, std::forward<Args>(args)...);
@@ -439,7 +451,7 @@ namespace lua4tinker {
     }
 
     template <typename T>
-    void class_object(lua_State *L, const char *object_name, T *object_ptr) {
+    void object_def(lua_State *L, const char *object_name, T *object_ptr) {
         // 创建一个表 需要调用者自行管理对象生命周期
         lua_newtable(L);
 
@@ -455,20 +467,21 @@ namespace lua4tinker {
     }
 
     template <typename CLASS_T, typename MEM_T>
-    void class_object_mem(lua_State *L, CLASS_T *object_ptr, const char *object_name, MEM_T CLASS_T::*mem_var_ptr, const char *mem_var_name) {
+    void object_mem_def(lua_State *L, CLASS_T *object_ptr, const char *object_name, MEM_T CLASS_T::*mem_var_ptr, const char *mem_var_name) {
         stack_scope_exit scope_exit(L);
         lua_getglobal(L, object_name);
         if (lua_type(L, 1) == LUA_TTABLE) {
             lua_pushstring(L, mem_var_name);
             new (lua_newuserdata(L, sizeof(mem_var<CLASS_T, MEM_T>))) mem_var<CLASS_T, MEM_T>(mem_var_ptr, object_ptr);
+            enum_stack(L);
             lua_rawset(L, -3);
         }else {
-            assert(!"需要事先通过class_object定义对象");
+            LOG_A("需要事先通过定义对象");
         }
     }
 
     template <typename CLASS_T, typename RET_T, typename... ARGS>
-    void class_object_func(lua_State *L, CLASS_T *object_ptr, const char *object_name, RET_T (CLASS_T::*func)(ARGS...), const char *mem_func_name) {
+    void object_func_def(lua_State *L, CLASS_T *object_ptr, const char *object_name, RET_T (CLASS_T::*func)(ARGS...), const char *mem_func_name) {
         stack_scope_exit scope_exit(L);
         lua_getglobal(L, object_name);
         if (lua_type(L, 1) == LUA_TTABLE) {
@@ -479,7 +492,7 @@ namespace lua4tinker {
             lua_pushcclosure(L, &FuncWarpType::invoke, 1);
             lua_rawset(L, -3);
         }else {
-            assert(!"需要事先通过class_object定义对象");
+            LOG_A("需要事先通过定义对象");
         }
     }
 }
